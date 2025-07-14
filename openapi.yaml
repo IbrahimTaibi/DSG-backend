@@ -1,0 +1,704 @@
+openapi: 3.0.0
+info:
+  title: DSG Backend API
+  version: 1.0.0
+  description: API documentation for the DSG Backend (local services marketplace)
+servers:
+  - url: http://localhost:5010
+    description: Local server
+paths:
+  /api/auth/register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserRegister"
+      responses:
+        "201":
+          description: User registered successfully
+        "400":
+          description: Validation error
+        "409":
+          description: Mobile already registered
+  /api/auth/login:
+    post:
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserLogin"
+      responses:
+        "200":
+          description: Login successful
+        "401":
+          description: Invalid credentials
+  /api/auth/google:
+    post:
+      summary: Google authentication (not implemented)
+      responses:
+        "501":
+          description: Not implemented
+
+  /api/products:
+    get:
+      summary: Get all products
+      responses:
+        "200":
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+    post:
+      summary: Create a new product (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          description: Validation error
+  /api/products/{id}:
+    get:
+      summary: Get product by ID
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Product details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: Product not found
+    put:
+      summary: Update product (admin only)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+      responses:
+        "200":
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: Product not found
+    delete:
+      summary: Delete product (admin only)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Product deleted
+        "404":
+          description: Product not found
+
+  /api/categories:
+    get:
+      summary: Get all categories
+      responses:
+        "200":
+          description: List of categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+    post:
+      summary: Create a new category (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryCreate"
+      responses:
+        "201":
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "400":
+          description: Validation error
+  /api/categories/tree:
+    get:
+      summary: Get category tree (nested)
+      responses:
+        "200":
+          description: Nested category tree
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryTree"
+  /api/categories/{id}:
+    put:
+      summary: Update category (admin only)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryCreate"
+      responses:
+        "200":
+          description: Category updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "404":
+          description: Category not found
+    delete:
+      summary: Delete category (admin only)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Category deleted
+        "404":
+          description: Category not found
+
+  /api/orders:
+    post:
+      summary: Place a new order (store only)
+      description: |
+        Places a new order for the authenticated store user. 
+        The user will receive an email notification with order details upon successful order placement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderCreate"
+      responses:
+        "201":
+          description: Order placed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: Validation error
+    get:
+      summary: Get all orders (admin only)
+      responses:
+        "200":
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+  /api/orders/my:
+    get:
+      summary: Get own orders (store only)
+      responses:
+        "200":
+          description: List of own orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+  /api/orders/{id}/assign:
+    put:
+      summary: Assign delivery guy (admin only)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deliveryGuyId:
+                  type: string
+      responses:
+        "200":
+          description: Order updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Order not found
+  /api/orders/{id}/status:
+    put:
+      summary: Update order status (admin only)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+      responses:
+        "200":
+          description: Order status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Order not found
+  /api/orders/assigned:
+    get:
+      summary: Get assigned orders (delivery only)
+      responses:
+        "200":
+          description: List of assigned orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+  /api/orders/{id}/deliverystatus:
+    put:
+      summary: Update delivery status (delivery only)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+      responses:
+        "200":
+          description: Delivery status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Order not found
+  /api/orders/{id}/cancel:
+    put:
+      summary: Cancel order (admin, store, delivery)
+      description: |
+        Cancels an order by ID. The user who placed the order will receive an email notification with the cancellation reason and order details.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Order not found
+
+  /api/messages/store/delivery:
+    post:
+      summary: Store sends message to delivery guy (live, order-based)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId:
+                  type: string
+                content:
+                  type: string
+      responses:
+        "201":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          description: Validation or business logic error
+  /api/messages/store/admin:
+    post:
+      summary: Store sends message to admin (REST only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        "201":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          description: Validation or business logic error
+  /api/messages/delivery/admin:
+    post:
+      summary: Delivery guy sends message to admin (live)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        "201":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          description: Validation or business logic error
+  /api/messages/history/{userId}:
+    get:
+      summary: Fetch chat history between two users
+      parameters:
+        - in: path
+          name: userId
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Chat history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+        "403":
+          description: Not allowed to view this chat
+
+  /api/products/search:
+    get:
+      summary: Advanced search for products
+      description: >
+        Search products by text, category, price range, stock, and sort/paginate results.
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Text search query
+        - in: query
+          name: category
+          schema:
+            type: string
+          description: Category ID to filter
+        - in: query
+          name: minPrice
+          schema:
+            type: number
+          description: Minimum price
+        - in: query
+          name: maxPrice
+          schema:
+            type: number
+          description: Maximum price
+        - in: query
+          name: inStock
+          schema:
+            type: boolean
+          description: Only show products in stock
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [price, name, createdAt]
+          description: Sort field
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+          description: Sort order
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+          description: Page number
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+          description: Results per page
+      responses:
+        "200":
+          description: Paginated, filtered, and sorted list of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  products:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Product"
+
+components:
+  schemas:
+    UserRegister:
+      type: object
+      properties:
+        name:
+          type: string
+        mobile:
+          type: string
+        password:
+          type: string
+        email:
+          type: string
+        address:
+          type: string
+        role:
+          type: string
+      required:
+        - name
+        - mobile
+        - password
+    UserLogin:
+      type: object
+      properties:
+        mobile:
+          type: string
+        password:
+          type: string
+      required:
+        - mobile
+        - password
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        mobile:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        address:
+          type: string
+    ProductCreate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        stock:
+          type: number
+        category:
+          type: string
+        additionalCategories:
+          type: array
+          items:
+            type: string
+        image:
+          type: string
+      required:
+        - name
+        - price
+        - category
+    Product:
+      allOf:
+        - $ref: "#/components/schemas/ProductCreate"
+        - type: object
+          properties:
+            id:
+              type: string
+    CategoryCreate:
+      type: object
+      properties:
+        name:
+          type: string
+        parent:
+          type: string
+      required:
+        - name
+    Category:
+      allOf:
+        - $ref: "#/components/schemas/CategoryCreate"
+        - type: object
+          properties:
+            id:
+              type: string
+    CategoryTree:
+      allOf:
+        - $ref: "#/components/schemas/Category"
+        - type: object
+          properties:
+            children:
+              type: array
+              items:
+                $ref: "#/components/schemas/CategoryTree"
+    OrderProduct:
+      type: object
+      properties:
+        product:
+          type: string
+        quantity:
+          type: number
+        price:
+          type: number
+    OrderCreate:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderProduct"
+      required:
+        - products
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        store:
+          type: string
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderProduct"
+        total:
+          type: number
+        status:
+          type: string
+        assignedTo:
+          type: string
+        paymentMethod:
+          type: string
+        cancellationReason:
+          type: string
+        statusHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+              changedBy:
+                type: string
+              changedAt:
+                type: string
+                format: date-time
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        sender:
+          type: string
+        receiver:
+          type: string
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        order:
+          type: string
