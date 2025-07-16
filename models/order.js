@@ -27,6 +27,7 @@ const orderSchema = new mongoose.Schema(
         "waiting_for_delivery",
         "delivering",
         "delivered",
+        "returned",
         "cancelled",
       ],
       default: "pending",

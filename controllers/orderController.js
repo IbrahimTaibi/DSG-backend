@@ -4,6 +4,7 @@ const ApiError = require("../utils/ApiError");
 const User = require("../models/user");
 const sendEmail = require("../utils/email");
 const mongoose = require("mongoose");
+const Return = require("../models/return");
 
 // Helper to format order details as HTML
 function orderHtml(order, products) {
@@ -184,7 +185,8 @@ const allowedTransitions = {
   pending: ["waiting_for_delivery", "cancelled"],
   waiting_for_delivery: ["delivering", "cancelled"],
   delivering: ["delivered", "cancelled"],
-  delivered: [],
+  delivered: ["returned"],
+  returned: [],
   cancelled: [],
 };
 
@@ -192,7 +194,10 @@ const allowedTransitions = {
 exports.assignDelivery = async (req, res) => {
   const { id } = req.params;
   const { deliveryGuyId } = req.body;
-  const order = await Order.findById(id);
+  const order = await Order.findById(id).populate([
+    { path: "products.product" },
+    { path: "store" },
+  ]);
   if (!order) throw new ApiError(404, "Order not found.");
   order.assignedTo = deliveryGuyId;
   order.status = "waiting_for_delivery";
@@ -201,10 +206,34 @@ exports.assignDelivery = async (req, res) => {
   const Notification = require("../models/notification");
   const { emitNotification } = require("../utils/notificationEmitter");
 
+  // Build detailed notification data
+  const store = order.store;
+  const products = order.products.map((p) => ({
+    name: p.product?.name || undefined,
+    quantity: p.quantity,
+    price: p.price,
+  }));
+  const address = order.address || null;
+
   const notification = await Notification.create({
     user: deliveryGuyId,
     type: "order_assigned",
-    data: { orderId: order._id, store: order.store },
+    data: {
+      orderId: order._id,
+      orderNumber: order.orderId,
+      store: store
+        ? {
+            id: store._id,
+            name: store.name,
+            address: store.address || null,
+            phone: store.mobile,
+          }
+        : null,
+      products,
+      address,
+      total: order.total,
+      status: order.status,
+    },
   });
 
   // Emit real-time notification to the delivery guy
@@ -283,6 +312,92 @@ exports.deliveryUpdateStatus = async (req, res) => {
   });
   await order.save();
   res.json(order);
+};
+
+// Store or Admin: Mark a delivered order as returned
+exports.returnOrder = async (req, res) => {
+  const { id } = req.params;
+  const order = await Order.findById(id);
+  if (!order) throw new ApiError(404, "Order not found.");
+  if (order.status !== "delivered") {
+    throw new ApiError(400, "Only delivered orders can be returned.");
+  }
+  // Only store owner or admin can return
+  if (
+    req.user.role !== "admin" &&
+    String(order.store) !== String(req.user.id)
+  ) {
+    throw new ApiError(403, "Not authorized to return this order.");
+  }
+  order.status = "returned";
+  order.statusHistory.push({
+    status: "returned",
+    changedBy: req.user.id,
+    changedAt: new Date(),
+  });
+  await order.save();
+  res.json(order);
+};
+
+// Store or Admin: Request a return for a delivered order
+exports.requestReturn = async (req, res) => {
+  const { id } = req.params;
+  const { products } = req.body;
+  if (!Array.isArray(products) || products.length === 0) {
+    throw new ApiError(400, "Products array is required for partial return.");
+  }
+  const order = await Order.findById(id);
+  if (!order) throw new ApiError(404, "Order not found.");
+  if (order.status !== "delivered") {
+    throw new ApiError(400, "Only delivered orders can be returned.");
+  }
+  // Only store owner or admin can request return
+  if (
+    req.user.role !== "admin" &&
+    String(order.store) !== String(req.user.id)
+  ) {
+    throw new ApiError(403, "Not authorized to return this order.");
+  }
+  // Validate products and quantities
+  const orderProductMap = {};
+  order.products.forEach((p) => {
+    orderProductMap[String(p.product)] = p.quantity;
+  });
+  // Calculate already returned quantities for this order
+  const previousReturns = await Return.find({ order: order._id });
+  const returnedCount = {};
+  previousReturns.forEach((ret) => {
+    (ret.products || []).forEach((rp) => {
+      const key = String(rp.product);
+      returnedCount[key] = (returnedCount[key] || 0) + rp.quantity;
+    });
+  });
+  // Validate each requested return
+  for (const item of products) {
+    const prodId = String(item.product);
+    const reqQty = item.quantity;
+    if (!orderProductMap[prodId]) {
+      throw new ApiError(400, `Product ${prodId} is not in the order.`);
+    }
+    const alreadyReturned = returnedCount[prodId] || 0;
+    const maxReturnable = orderProductMap[prodId] - alreadyReturned;
+    if (reqQty < 1 || reqQty > maxReturnable) {
+      throw new ApiError(
+        400,
+        `Invalid return quantity for product ${prodId}. Max allowed: ${maxReturnable}`,
+      );
+    }
+  }
+  // Create the return
+  const returnDoc = await Return.create({
+    order: order._id,
+    requestedBy: req.user.id,
+    products: products.map((p) => ({
+      product: p.product,
+      quantity: p.quantity,
+    })),
+  });
+  res.status(201).json(returnDoc);
 };
 
 exports.getOrderById = async (req, res) => {
