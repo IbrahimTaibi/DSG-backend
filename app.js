@@ -13,10 +13,15 @@ const app = express();
 // Middleware
 app.use(helmet());
 app.use(
-  cors(
-    { origin: process.env.FRONTEND_URL, credentials: true } ||
+  cors({
+    origin: [
+      process.env.FRONTEND_URL,
+      "https://www.dsg-group-tunisie.com",
+      "https://dsg-group-tunisie.com",
       "http://localhost:3000",
-  ),
+    ].filter(Boolean),
+    credentials: true,
+  }),
 );
 app.use(express.json());
 app.use(morgan("dev"));

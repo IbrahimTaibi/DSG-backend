@@ -54,6 +54,22 @@ router.put(
   catchAsync(orderController.cancelOrder),
 );
 
+// Return order (store, admin)
+router.put(
+  "/:id/return",
+  auth,
+  role("admin", "store"),
+  catchAsync(orderController.returnOrder),
+);
+
+// Request return (store, admin)
+router.put(
+  "/:id/request-return",
+  auth,
+  role("admin", "store"),
+  catchAsync(orderController.requestReturn),
+);
+
 // Get order by ID
 router.get("/:id", auth, catchAsync(orderController.getOrderById));
 
