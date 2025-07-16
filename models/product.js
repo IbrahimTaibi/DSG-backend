@@ -29,4 +29,15 @@ const productSchema = new mongoose.Schema(
 // Text index for search
 productSchema.index({ name: "text", description: "text" });
 
+productSchema.methods.adjustStock = async function (quantity) {
+  this.stock += quantity;
+  if (this.stock <= 0) {
+    this.status = "out_of_stock";
+    this.stock = 0;
+  } else if (this.status === "out_of_stock" && this.stock > 0) {
+    this.status = "active";
+  }
+  await this.save();
+};
+
 module.exports = mongoose.model("Product", productSchema);

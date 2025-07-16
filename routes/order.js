@@ -4,9 +4,19 @@ const orderController = require("../controllers/orderController");
 const catchAsync = require("../utils/catchAsync");
 const auth = require("../middleware/auth");
 const role = require("../middleware/role");
+const { fetchReturn } = require("../middleware/fetchResource");
+const {
+  validateReturnRequest,
+  validateReturnStatusTransition,
+} = require("../middleware/validate");
 
-// Store
-router.post("/", auth, role("store"), catchAsync(orderController.placeOrder));
+// Store or Admin
+router.post(
+  "/",
+  auth,
+  role("store", "admin"),
+  catchAsync(orderController.placeOrder),
+);
 router.get("/my", auth, role("store"), catchAsync(orderController.getMyOrders));
 
 // Admin
@@ -22,6 +32,22 @@ router.put(
   auth,
   role("admin"),
   catchAsync(orderController.updateStatus),
+);
+
+// Update order (admin only)
+router.put(
+  "/:id",
+  auth,
+  role("admin"),
+  catchAsync(orderController.updateOrder),
+);
+
+// Soft delete order (admin only)
+router.delete(
+  "/:id",
+  auth,
+  role("admin"),
+  catchAsync(orderController.deleteOrder),
 );
 
 // Delivery Guy
@@ -67,7 +93,18 @@ router.put(
   "/:id/request-return",
   auth,
   role("admin", "store"),
+  validateReturnRequest,
   catchAsync(orderController.requestReturn),
+);
+
+// Update return status (admin, store)
+router.put(
+  "/returns/:id/status",
+  auth,
+  role("admin", "store"),
+  fetchReturn(),
+  validateReturnStatusTransition,
+  catchAsync(orderController.updateReturnStatus),
 );
 
 // Get order by ID

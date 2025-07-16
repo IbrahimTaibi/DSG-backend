@@ -5,6 +5,7 @@ const User = require("../models/user");
 const sendEmail = require("../utils/email");
 const mongoose = require("mongoose");
 const Return = require("../models/return");
+const catchAsync = require("../utils/catchAsync");
 
 // Helper to format order details as HTML
 function orderHtml(order, products) {
@@ -36,77 +37,23 @@ function orderHtml(order, products) {
 
 // Store: Place order
 exports.placeOrder = async (req, res) => {
-  const { products, address } = req.body;
-  if (!products || !Array.isArray(products) || products.length === 0) {
-    throw new ApiError(400, "Products are required.");
+  const { products, address, store } = req.body;
+  let storeId = req.user.id;
+  if (req.user.role === "admin" && store) {
+    // Validate the store exists and is a store user
+    const storeUser = await User.findById(store);
+    if (!storeUser || storeUser.role !== "store") {
+      throw new ApiError(400, "Invalid store ID for order creation.");
+    }
+    storeId = storeUser._id;
   }
-  // Fetch all products in one query
-  const productIds = products.map((item) => item.product);
-  const dbProducts = await Product.find({ _id: { $in: productIds } });
-  const productMap = {};
-  dbProducts.forEach((p) => {
-    productMap[p._id.toString()] = p;
-  });
-  // Calculate total and validate products
-  let total = 0;
-  const orderProducts = products.map((item) => {
-    const product = productMap[item.product];
-    if (!product) throw new ApiError(404, `Product not found: ${item.product}`);
-    if (product.stock < item.quantity)
-      throw new ApiError(400, `Insufficient stock for ${product.name}`);
-    total += product.price * item.quantity;
-    return {
-      product: product._id,
-      quantity: item.quantity,
-      price: product.price, // Use current price from DB
-    };
-  });
-  // Reduce stock
-  await Promise.all(
-    products.map(async (item) => {
-      const product = productMap[item.product];
-      if (!product) return;
-      const updated = await Product.findByIdAndUpdate(
-        item.product,
-        { $inc: { stock: -item.quantity } },
-        { new: true },
-      );
-      if (updated && updated.stock === 0) {
-        updated.status = "out_of_stock";
-        await updated.save();
-      } else if (
-        updated &&
-        updated.status === "out_of_stock" &&
-        updated.stock > 0
-      ) {
-        updated.status = "active";
-        await updated.save();
-      }
-    }),
-  );
-  // Generate custom orderId
-  const year = new Date().getFullYear();
-  const count = await Order.countDocuments({
-    createdAt: {
-      $gte: new Date(`${year}-01-01T00:00:00Z`),
-      $lt: new Date(`${year + 1}-01-01T00:00:00Z`),
-    },
-  });
-  const orderId = `ORD-${year}-${String(count + 1).padStart(3, "0")}`;
-  const order = new Order({
-    store: req.user.id,
-    products: orderProducts,
-    total,
-    orderId,
-    address: address || null,
-  });
-  await order.save();
+  const order = await Order.placeOrder(storeId, products, address);
   // Send confirmation email
-  const user = await User.findById(req.user.id);
+  const user = await User.findById(storeId);
   if (user && user.email) {
     const populatedProducts = await Promise.all(
-      orderProducts.map(async (op) => ({
-        ...op,
+      order.products.map(async (op) => ({
+        ...op.toObject(),
         product: await Product.findById(op.product),
       })),
     );
@@ -124,7 +71,7 @@ exports.placeOrder = async (req, res) => {
   // Create order confirmation notification for the user
   const Notification = require("../models/notification");
   await Notification.create({
-    user: user._id,
+    user: storeId,
     type: "order_confirmation",
     data: {
       orderId: order._id,
@@ -166,7 +113,10 @@ exports.placeOrder = async (req, res) => {
 
 // Store: Get own orders
 exports.getMyOrders = async (req, res) => {
-  const orders = await Order.find({ store: req.user.id })
+  const orders = await Order.find({
+    store: req.user.id,
+    deleted: { $ne: true },
+  })
     .populate("products.product")
     .sort("-createdAt");
   res.json(orders);
@@ -174,7 +124,7 @@ exports.getMyOrders = async (req, res) => {
 
 // Admin: Get all orders
 exports.getAll = async (req, res) => {
-  const orders = await Order.find()
+  const orders = await Order.find({ deleted: { $ne: true } })
     .populate("store assignedTo products.product")
     .sort("-createdAt");
   res.json(orders);
@@ -283,9 +233,51 @@ exports.updateStatus = async (req, res) => {
   res.json(order);
 };
 
+// Update order (admin only)
+exports.updateOrder = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { address, assignedTo, status, cancellationReason } = req.body;
+  const order = await Order.findById(id);
+  if (!order) throw new ApiError(404, "Order not found.");
+
+  // Update address if provided
+  if (address) {
+    order.address = address;
+  }
+  // Update assignedTo if provided
+  if (assignedTo) {
+    order.assignedTo = assignedTo;
+  }
+  // Update cancellationReason if provided
+  if (typeof cancellationReason !== "undefined") {
+    order.cancellationReason = cancellationReason;
+  }
+  // Update status if provided
+  if (status) {
+    const allowed = allowedTransitions[order.status] || [];
+    if (!allowed.includes(status)) {
+      throw new ApiError(
+        400,
+        `Cannot change status from ${order.status} to ${status}`,
+      );
+    }
+    order.status = status;
+    order.statusHistory.push({
+      status,
+      changedBy: req.user.id,
+      changedAt: new Date(),
+    });
+  }
+  await order.save();
+  res.json(order);
+});
+
 // Delivery Guy: Get assigned orders
 exports.getAssigned = async (req, res) => {
-  const orders = await Order.find({ assignedTo: req.user.id })
+  const orders = await Order.find({
+    assignedTo: req.user.id,
+    deleted: { $ne: true },
+  })
     .populate("store products.product")
     .sort("-createdAt");
   res.json(orders);
@@ -400,12 +392,20 @@ exports.requestReturn = async (req, res) => {
   res.status(201).json(returnDoc);
 };
 
+// Admin or Store: Update return status
+exports.updateReturnStatus = async (req, res) => {
+  const { status } = req.body;
+  req.return.status = status;
+  await req.return.save();
+  res.json(req.return);
+};
+
 exports.getOrderById = async (req, res) => {
   const { id } = req.params;
   const isObjectId = mongoose.Types.ObjectId.isValid(id);
   const query = isObjectId
-    ? { $or: [{ _id: id }, { orderId: id }] }
-    : { orderId: id };
+    ? { $or: [{ _id: id }, { orderId: id }], deleted: { $ne: true } }
+    : { orderId: id, deleted: { $ne: true } };
 
   const order = await Order.findOne(query)
     .populate("products.product")
@@ -425,3 +425,34 @@ exports.getOrderById = async (req, res) => {
 
   res.json(order);
 };
+
+exports.cancelOrder = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { cancellationReason } = req.body;
+  const order = await Order.findById(id);
+  if (!order) throw new ApiError(404, "Order not found.");
+  const allowed = allowedTransitions[order.status] || [];
+  if (!allowed.includes("cancelled")) {
+    throw new ApiError(400, `Cannot cancel order from status ${order.status}`);
+  }
+  order.status = "cancelled";
+  if (typeof cancellationReason !== "undefined") {
+    order.cancellationReason = cancellationReason;
+  }
+  order.statusHistory.push({
+    status: "cancelled",
+    changedBy: req.user.id,
+    changedAt: new Date(),
+  });
+  await order.save();
+  res.json(order);
+});
+
+exports.deleteOrder = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const order = await Order.findById(id);
+  if (!order) throw new ApiError(404, "Order not found.");
+  order.deleted = true;
+  await order.save();
+  res.json({ message: "Order soft deleted.", order });
+});

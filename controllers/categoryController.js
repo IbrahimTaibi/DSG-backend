@@ -1,9 +1,10 @@
 const Category = require("../models/category");
 const ApiError = require("../utils/ApiError");
 const slugify = require("slugify");
+const catchAsync = require("../utils/catchAsync");
 
 // Create category (admin only)
-exports.create = async (req, res) => {
+exports.create = catchAsync(async (req, res) => {
   const { name, parent } = req.body;
   if (!name) throw new ApiError(400, "Category name is required.");
   const exists = await Category.findOne({ name });
@@ -14,16 +15,16 @@ exports.create = async (req, res) => {
   const category = new Category({ name, parent: parent || null, slug });
   await category.save();
   res.status(201).json(category);
-};
+});
 
 // Get all categories (flat)
-exports.getAll = async (req, res) => {
+exports.getAll = catchAsync(async (req, res) => {
   const categories = await Category.find().select("name parent slug");
   res.json(categories);
-};
+});
 
 // Get category tree (nested)
-exports.getTree = async (req, res) => {
+exports.getTree = catchAsync(async (req, res) => {
   const categories = await Category.find().select("name parent slug");
   // Helper to build tree
   function buildTree(parentId = null) {
@@ -38,25 +39,24 @@ exports.getTree = async (req, res) => {
       }));
   }
   res.json(buildTree());
-};
+});
 
 // Get category by slug
-exports.getBySlug = async (req, res) => {
+exports.getBySlug = catchAsync(async (req, res) => {
   const { slug } = req.params;
   const category = await Category.findOne({ slug });
   if (!category)
     return res.status(404).json({ message: "Category not found." });
   res.json(category);
-};
+});
 
 // Get category by full slug path (nested)
-exports.getBySlugPath = async (req, res) => {
+exports.getBySlugPath = catchAsync(async (req, res) => {
   const slugPath = req.params[0];
   if (!slugPath) return res.status(400).json({ message: "Missing slug path." });
   const slugs = slugPath.split("/").filter(Boolean);
   if (slugs.length === 0)
     return res.status(400).json({ message: "Invalid slug path." });
-  const Category = require("../models/category");
   let parent = null;
   let category = null;
   for (const slug of slugs) {
@@ -66,10 +66,10 @@ exports.getBySlugPath = async (req, res) => {
     parent = category._id;
   }
   res.json(category);
-};
+});
 
 // Update category (admin only)
-exports.update = async (req, res) => {
+exports.update = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { name, parent } = req.body;
   const category = await Category.findById(id);
@@ -81,13 +81,13 @@ exports.update = async (req, res) => {
   if (typeof parent !== "undefined") category.parent = parent;
   await category.save();
   res.json(category);
-};
+});
 
 // Delete category (admin only)
-exports.remove = async (req, res) => {
+exports.remove = catchAsync(async (req, res) => {
   const { id } = req.params;
   const category = await Category.findById(id);
   if (!category) throw new ApiError(404, "Category not found.");
   await category.deleteOne();
   res.json({ message: "Category deleted." });
-};
+});
