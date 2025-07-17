@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Product = require("./product");
+const User = require("./user");
 
 const orderProductSchema = new mongoose.Schema({
   product: {
@@ -99,6 +100,17 @@ orderSchema.statics.placeOrder = async function (storeId, products, address) {
       await product.adjustStock(-item.quantity);
     }
   }
+  // If address is not provided, use the user's address if available
+  let finalAddress = address || null;
+  if (!finalAddress) {
+    const user = await User.findById(storeId);
+    if (user && user.address) {
+      finalAddress = user.address;
+    }
+  }
+  if (!finalAddress) {
+    throw new Error("Address is required to place the order.");
+  }
   // Generate custom orderId
   const year = new Date().getFullYear();
   const count = await this.countDocuments({
@@ -113,7 +125,7 @@ orderSchema.statics.placeOrder = async function (storeId, products, address) {
     products: orderProducts,
     total,
     orderId,
-    address: address || null,
+    address: finalAddress,
   });
   await order.save();
   return order;

@@ -6,6 +6,10 @@ const sendEmail = require("../utils/email");
 const mongoose = require("mongoose");
 const Return = require("../models/return");
 const catchAsync = require("../utils/catchAsync");
+const {
+  emitNotification,
+  emitNotificationToUsers,
+} = require("../utils/notificationEmitter");
 
 // Helper to format order details as HTML
 function orderHtml(order, products) {
@@ -60,7 +64,7 @@ exports.placeOrder = async (req, res) => {
     await sendEmail({
       to: user.email,
       subject: "Your DSG Order Confirmation",
-      html: require("../utils/email").emailWrapper({
+      html: sendEmail.emailWrapper({
         title: "Order Confirmation",
         bodyHtml: `<h2 style='color:#4f8cff;'>Thank you for your order, ${
           user.name
@@ -70,7 +74,7 @@ exports.placeOrder = async (req, res) => {
   }
   // Create order confirmation notification for the user
   const Notification = require("../models/notification");
-  await Notification.create({
+  const orderNotif = await Notification.create({
     user: storeId,
     type: "order_confirmation",
     data: {
@@ -85,11 +89,12 @@ exports.placeOrder = async (req, res) => {
       address: order.address || null,
     },
   });
+  emitNotification(storeId, orderNotif);
 
   // Notify all admins about the new order
   const admins = await User.find({ role: "admin" });
   for (const admin of admins) {
-    await Notification.create({
+    const notif = await Notification.create({
       user: admin._id,
       type: "new_order",
       data: {
@@ -107,6 +112,7 @@ exports.placeOrder = async (req, res) => {
         status: order.status,
       },
     });
+    emitNotification(admin._id, notif);
   }
   res.status(201).json(order);
 };
@@ -154,40 +160,43 @@ exports.assignDelivery = async (req, res) => {
   await order.save();
   // Notify delivery guy
   const Notification = require("../models/notification");
-  const { emitNotification } = require("../utils/notificationEmitter");
-
-  // Build detailed notification data
-  const store = order.store;
-  const products = order.products.map((p) => ({
-    name: p.product?.name || undefined,
-    quantity: p.quantity,
-    price: p.price,
-  }));
-  const address = order.address || null;
-
-  const notification = await Notification.create({
+  const deliveryNotif = await Notification.create({
     user: deliveryGuyId,
     type: "order_assigned",
     data: {
       orderId: order._id,
       orderNumber: order.orderId,
-      store: store
+      store: order.store
         ? {
-            id: store._id,
-            name: store.name,
-            address: store.address || null,
-            phone: store.mobile,
+            id: order.store._id,
+            name: order.store.name,
+            address: order.store.address || null,
+            phone: order.store.mobile,
           }
         : null,
-      products,
-      address,
+      products: order.products.map((p) => ({
+        name: p.product?.name || undefined,
+        quantity: p.quantity,
+        price: p.price,
+      })),
+      address: order.address || null,
       total: order.total,
       status: order.status,
     },
   });
-
-  // Emit real-time notification to the delivery guy
-  emitNotification(deliveryGuyId, notification);
+  emitNotification(deliveryGuyId, deliveryNotif);
+  // Optionally send email to delivery guy (if email exists)
+  const deliveryUser = await User.findById(deliveryGuyId);
+  if (deliveryUser && deliveryUser.email) {
+    await sendEmail({
+      to: deliveryUser.email,
+      subject: "New Order Assigned",
+      html: sendEmail.emailWrapper({
+        title: "Order Assigned to You",
+        bodyHtml: `<p>You have been assigned a new order #${order.orderId}.</p>`,
+      }),
+    });
+  }
   res.json(order);
 };
 
@@ -236,9 +245,19 @@ exports.updateStatus = async (req, res) => {
 // Update order (admin only)
 exports.updateOrder = catchAsync(async (req, res) => {
   const { id } = req.params;
-  const { address, assignedTo, status, cancellationReason } = req.body;
+  const { address, assignedTo, status, cancellationReason, products, total } =
+    req.body;
   const order = await Order.findById(id);
   if (!order) throw new ApiError(404, "Order not found.");
+  let statusChanged = false;
+  let oldStatus = order.status;
+
+  // Restrict support: only allow address, assignedTo, cancellationReason, status
+  if (req.user.role === "support") {
+    if (typeof products !== "undefined" || typeof total !== "undefined") {
+      throw new ApiError(403, "Support cannot change products or total.");
+    }
+  }
 
   // Update address if provided
   if (address) {
@@ -267,8 +286,63 @@ exports.updateOrder = catchAsync(async (req, res) => {
       changedBy: req.user.id,
       changedAt: new Date(),
     });
+    statusChanged = true;
   }
   await order.save();
+  // Notifications for status change
+  if (statusChanged && status !== oldStatus) {
+    const Notification = require("../models/notification");
+    // Notify store
+    const storeNotif = await Notification.create({
+      user: order.store,
+      type: "order_status_update",
+      data: {
+        orderId: order._id,
+        status: order.status,
+        oldStatus,
+      },
+    });
+    emitNotification(order.store, storeNotif);
+    // Notify delivery (if assigned)
+    if (order.assignedTo) {
+      const deliveryNotif = await Notification.create({
+        user: order.assignedTo,
+        type: "order_status_update",
+        data: {
+          orderId: order._id,
+          status: order.status,
+          oldStatus,
+        },
+      });
+      emitNotification(order.assignedTo, deliveryNotif);
+    }
+    // Notify all admins
+    const admins = await User.find({ role: "admin" });
+    for (const admin of admins) {
+      const notif = await Notification.create({
+        user: admin._id,
+        type: "order_status_update",
+        data: {
+          orderId: order._id,
+          status: order.status,
+          oldStatus,
+        },
+      });
+      emitNotification(admin._id, notif);
+    }
+    // Optionally send email to store
+    const storeUser = await User.findById(order.store);
+    if (storeUser && storeUser.email) {
+      await sendEmail({
+        to: storeUser.email,
+        subject: `Order Status Updated: ${order.status}`,
+        html: sendEmail.emailWrapper({
+          title: `Order Status Updated`,
+          bodyHtml: `<p>Your order #${order.orderId} status changed from <b>${oldStatus}</b> to <b>${order.status}</b>.</p>`,
+        }),
+      });
+    }
+  }
   res.json(order);
 });
 
@@ -328,6 +402,42 @@ exports.returnOrder = async (req, res) => {
     changedAt: new Date(),
   });
   await order.save();
+  // Notify store
+  const Notification = require("../models/notification");
+  const storeNotif = await Notification.create({
+    user: order.store,
+    type: "order_returned",
+    data: {
+      orderId: order._id,
+      status: order.status,
+    },
+  });
+  emitNotification(order.store, storeNotif);
+  // Notify all admins
+  const admins = await User.find({ role: "admin" });
+  for (const admin of admins) {
+    const notif = await Notification.create({
+      user: admin._id,
+      type: "order_returned",
+      data: {
+        orderId: order._id,
+        status: order.status,
+      },
+    });
+    emitNotification(admin._id, notif);
+  }
+  // Optionally send email to store
+  const storeUser = await User.findById(order.store);
+  if (storeUser && storeUser.email) {
+    await sendEmail({
+      to: storeUser.email,
+      subject: `Order Returned`,
+      html: sendEmail.emailWrapper({
+        title: `Order Returned`,
+        bodyHtml: `<p>Your order #${order.orderId} has been marked as returned.</p>`,
+      }),
+    });
+  }
   res.json(order);
 };
 
@@ -389,6 +499,42 @@ exports.requestReturn = async (req, res) => {
       quantity: p.quantity,
     })),
   });
+  // Notify store
+  const Notification = require("../models/notification");
+  const storeNotif = await Notification.create({
+    user: order.store,
+    type: "order_return_requested",
+    data: {
+      orderId: order._id,
+      status: order.status,
+    },
+  });
+  emitNotification(order.store, storeNotif);
+  // Notify all admins
+  const admins = await User.find({ role: "admin" });
+  for (const admin of admins) {
+    const notif = await Notification.create({
+      user: admin._id,
+      type: "order_return_requested",
+      data: {
+        orderId: order._id,
+        status: order.status,
+      },
+    });
+    emitNotification(admin._id, notif);
+  }
+  // Optionally send email to store
+  const storeUser = await User.findById(order.store);
+  if (storeUser && storeUser.email) {
+    await sendEmail({
+      to: storeUser.email,
+      subject: `Order Return Requested`,
+      html: sendEmail.emailWrapper({
+        title: `Order Return Requested`,
+        bodyHtml: `<p>A return has been requested for your order #${order.orderId}.</p>`,
+      }),
+    });
+  }
   res.status(201).json(returnDoc);
 };
 
@@ -426,6 +572,7 @@ exports.getOrderById = async (req, res) => {
   res.json(order);
 };
 
+// Cancel order
 exports.cancelOrder = catchAsync(async (req, res) => {
   const { id } = req.params;
   const { cancellationReason } = req.body;
@@ -445,6 +592,59 @@ exports.cancelOrder = catchAsync(async (req, res) => {
     changedAt: new Date(),
   });
   await order.save();
+  // Notifications for cancellation
+  const Notification = require("../models/notification");
+  // Notify store
+  const storeNotif = await Notification.create({
+    user: order.store,
+    type: "order_cancelled",
+    data: {
+      orderId: order._id,
+      cancellationReason: order.cancellationReason,
+    },
+  });
+  emitNotification(order.store, storeNotif);
+  // Notify delivery (if assigned)
+  if (order.assignedTo) {
+    const deliveryNotif = await Notification.create({
+      user: order.assignedTo,
+      type: "order_cancelled",
+      data: {
+        orderId: order._id,
+        cancellationReason: order.cancellationReason,
+      },
+    });
+    emitNotification(order.assignedTo, deliveryNotif);
+  }
+  // Notify all admins
+  const admins = await User.find({ role: "admin" });
+  for (const admin of admins) {
+    const notif = await Notification.create({
+      user: admin._id,
+      type: "order_cancelled",
+      data: {
+        orderId: order._id,
+        cancellationReason: order.cancellationReason,
+      },
+    });
+    emitNotification(admin._id, notif);
+  }
+  // Optionally send email to store
+  const storeUser = await User.findById(order.store);
+  if (storeUser && storeUser.email) {
+    await sendEmail({
+      to: storeUser.email,
+      subject: `Order Cancelled`,
+      html: sendEmail.emailWrapper({
+        title: `Order Cancelled`,
+        bodyHtml: `<p>Your order #${
+          order.orderId
+        } has been cancelled.</p><p>Reason: ${
+          order.cancellationReason || "N/A"
+        }</p>`,
+      }),
+    });
+  }
   res.json(order);
 });
 
