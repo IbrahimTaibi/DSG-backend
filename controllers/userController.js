@@ -3,7 +3,7 @@ const ApiError = require("../utils/ApiError");
 
 // List all users (admin only)
 exports.list = async (req, res) => {
-  const users = await User.find().select(
+  const users = await User.find({ status: { $ne: "deleted" } }).select(
     "-password -resetPasswordToken -resetPasswordExpires",
   );
   res.json(users);
@@ -11,9 +11,10 @@ exports.list = async (req, res) => {
 
 // Get a single user by ID (admin only)
 exports.getById = async (req, res) => {
-  const user = await User.findById(req.params.id).select(
-    "-password -resetPasswordToken -resetPasswordExpires",
-  );
+  const user = await User.findOne({
+    _id: req.params.id,
+    status: { $ne: "deleted" },
+  }).select("-password -resetPasswordToken -resetPasswordExpires");
   if (!user) throw new ApiError(404, "User not found.");
   res.json(user);
 };
@@ -29,7 +30,11 @@ exports.update = async (req, res) => {
   if (address) user.address = address;
   if (status) user.status = status;
   await user.save();
-  res.json(user);
+  const userObj = user.toObject();
+  delete userObj.password;
+  delete userObj.resetPasswordToken;
+  delete userObj.resetPasswordExpires;
+  res.json(userObj);
 };
 
 // Delete a user by ID (admin only)
@@ -37,14 +42,18 @@ exports.remove = async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) throw new ApiError(404, "User not found.");
   await user.deleteOne();
-  res.json({ message: "User deleted." });
+  const userObj = user.toObject();
+  delete userObj.password;
+  delete userObj.resetPasswordToken;
+  delete userObj.resetPasswordExpires;
+  res.json({ message: "User deleted.", user: userObj });
 };
 
 // List all users with order count (admin only)
 exports.listWithOrderCount = async (req, res) => {
   const User = require("../models/user");
   const Order = require("../models/order");
-  const users = await User.find().select(
+  const users = await User.find({ status: { $ne: "deleted" } }).select(
     "-password -resetPasswordToken -resetPasswordExpires",
   );
   const userIds = users.map((u) => u._id);
@@ -62,4 +71,13 @@ exports.listWithOrderCount = async (req, res) => {
     orderCount: countMap[u._id.toString()] || 0,
   }));
   res.json(usersWithOrderCount);
+};
+
+// List all delivery users (admin only)
+exports.listDelivery = async (req, res) => {
+  const users = await User.find({
+    role: "delivery",
+    status: { $ne: "deleted" },
+  }).select("-password -resetPasswordToken -resetPasswordExpires");
+  res.json(users);
 };

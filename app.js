@@ -31,7 +31,7 @@ const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
 });
-// app.use(limiter); // Rate limiting temporarily disabled for development
+app.use(limiter); // Rate limiting enabled globally. Tune per route for production if needed.
 
 // Health Check
 app.get("/api/health", (req, res) => {

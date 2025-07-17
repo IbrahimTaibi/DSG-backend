@@ -2,6 +2,15 @@ const jwt = require("jsonwebtoken");
 const Message = require("../models/message");
 const Order = require("../models/order");
 const User = require("../models/user");
+const ChatSession = require("../models/chatSession");
+
+async function hasActiveSession(userA, userB, type) {
+  return !!(await ChatSession.findOne({
+    participants: { $all: [userA, userB] },
+    type,
+    active: true,
+  }));
+}
 
 module.exports = (io) => {
   // Socket.io authentication middleware
@@ -28,22 +37,63 @@ module.exports = (io) => {
       const receiver = await User.findById(to);
       if (!receiver) return socket.emit("error", "Receiver not found");
 
-      // Delivery <-> Admin
-      if (
-        (senderRole === "delivery" && receiver.role === "admin") ||
-        (senderRole === "admin" && receiver.role === "delivery")
-      ) {
+      // Admin can chat with anyone
+      if (senderRole === "admin") {
         const message = await Message.create({
           sender: userId,
           receiver: to,
           content,
+          order: orderId,
         });
         io.to(to).emit("receive_message", message);
         socket.emit("receive_message", message);
         return;
       }
-
-      // Store <-> Delivery (order-based, only if delivering)
+      if (receiver.role === "admin") {
+        // Delivery <-> Admin always allowed
+        if (senderRole === "delivery") {
+          const message = await Message.create({
+            sender: userId,
+            receiver: to,
+            content,
+            order: orderId,
+          });
+          io.to(to).emit("receive_message", message);
+          socket.emit("receive_message", message);
+          return;
+        }
+        // Store <-> Admin only if session exists
+        if (senderRole === "store") {
+          const allowed = await hasActiveSession(userId, to, "store-admin");
+          if (!allowed)
+            return socket.emit("error", "Admin has not accepted chat request.");
+          const message = await Message.create({
+            sender: userId,
+            receiver: to,
+            content,
+            order: orderId,
+          });
+          io.to(to).emit("receive_message", message);
+          socket.emit("receive_message", message);
+          return;
+        }
+      }
+      // Store <-> Support always allowed
+      if (
+        (senderRole === "store" && receiver.role === "support") ||
+        (senderRole === "support" && receiver.role === "store")
+      ) {
+        const message = await Message.create({
+          sender: userId,
+          receiver: to,
+          content,
+          order: orderId,
+        });
+        io.to(to).emit("receive_message", message);
+        socket.emit("receive_message", message);
+        return;
+      }
+      // Store <-> Delivery (order-based, only if assigned)
       if (
         (senderRole === "store" && receiver.role === "delivery") ||
         (senderRole === "delivery" && receiver.role === "store")
@@ -51,9 +101,7 @@ module.exports = (io) => {
         if (!orderId) return socket.emit("error", "Order ID required");
         const order = await Order.findById(orderId);
         if (!order) return socket.emit("error", "Order not found");
-        if (order.status !== "delivering")
-          return socket.emit("error", "Chat only allowed when delivering");
-        // Check assignment
+        // Only allow if assigned
         if (
           !(
             String(order.store) === userId ||
@@ -73,23 +121,21 @@ module.exports = (io) => {
         socket.emit("receive_message", message);
         return;
       }
-
-      // Delivery <-> Delivery not allowed
+      // Delivery <-> Delivery only if admin opened session
       if (senderRole === "delivery" && receiver.role === "delivery") {
-        return socket.emit(
-          "error",
-          "Delivery guys cannot chat with each other",
-        );
+        const allowed = await hasActiveSession(userId, to, "delivery-delivery");
+        if (!allowed)
+          return socket.emit("error", "Admin has not opened chat window.");
+        const message = await Message.create({
+          sender: userId,
+          receiver: to,
+          content,
+          order: orderId,
+        });
+        io.to(to).emit("receive_message", message);
+        socket.emit("receive_message", message);
+        return;
       }
-
-      // Store <-> Admin not allowed live
-      if (
-        (senderRole === "store" && receiver.role === "admin") ||
-        (senderRole === "admin" && receiver.role === "store")
-      ) {
-        return socket.emit("error", "Store-admin chat is not live");
-      }
-
       socket.emit("error", "Not allowed");
     });
 

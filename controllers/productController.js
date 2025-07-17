@@ -2,9 +2,10 @@ const Product = require("../models/product");
 const ApiError = require("../utils/ApiError");
 const mongoose = require("mongoose");
 const Review = require("../models/review");
+const catchAsync = require("../utils/catchAsync");
 
 // Create product (admin only)
-exports.create = async (req, res) => {
+exports.create = catchAsync(async (req, res) => {
   const {
     name,
     description,
@@ -17,11 +18,6 @@ exports.create = async (req, res) => {
   if (!name || !price || !category)
     throw new ApiError(400, "Name, price, and category are required.");
 
-  console.log(
-    "Creating product with additionalCategories:",
-    additionalCategories,
-  );
-
   const product = new Product({
     name,
     description,
@@ -32,30 +28,29 @@ exports.create = async (req, res) => {
     image,
   });
   await product.save();
-  console.log("Saved product:", product);
   res.status(201).json(product);
-};
+});
 
 // Get all products
-exports.getAll = async (req, res) => {
+exports.getAll = catchAsync(async (req, res) => {
   const products = await Product.find().populate([
     "category",
     "additionalCategories",
   ]);
   res.json(products);
-};
+});
 
 // Get product by ID
-exports.getById = async (req, res) => {
+exports.getById = catchAsync(async (req, res) => {
   const product = await req.product.populate([
     "category",
     "additionalCategories",
   ]);
   res.json(product);
-};
+});
 
 // Update product (admin only)
-exports.update = async (req, res) => {
+exports.update = catchAsync(async (req, res) => {
   const product = req.product;
   const {
     name,
@@ -66,15 +61,6 @@ exports.update = async (req, res) => {
     additionalCategories,
     image,
   } = req.body;
-
-  console.log(
-    "Updating product with additionalCategories:",
-    additionalCategories,
-  );
-  console.log(
-    "Current product additionalCategories:",
-    product.additionalCategories,
-  );
 
   if (name) product.name = name;
   if (description) product.description = description;
@@ -92,20 +78,17 @@ exports.update = async (req, res) => {
   if (image) product.image = image;
 
   await product.save();
-  console.log("Updated product:", product);
   res.json(product);
-};
+});
 
 // Delete product (admin only)
-exports.remove = async (req, res) => {
+exports.remove = catchAsync(async (req, res) => {
   await req.product.deleteOne();
   res.json({ message: "Product deleted." });
-};
+});
 
 // Advanced search for products
-exports.advancedSearch = async (req, res) => {
-  console.log("Received search query:", req.query);
-
+exports.advancedSearch = catchAsync(async (req, res) => {
   const {
     q,
     category,
@@ -125,7 +108,6 @@ exports.advancedSearch = async (req, res) => {
     // If not a valid ObjectId, treat as slug
     if (!category.match(/^[0-9a-fA-F]{24}$/)) {
       const catDoc = await Category.findOne({ slug: category });
-      console.log("Category lookup by slug:", category, "=>", catDoc);
       if (catDoc) categoryId = catDoc._id.toString();
       else {
         // No such category, return empty result
@@ -138,7 +120,6 @@ exports.advancedSearch = async (req, res) => {
       }
     }
   }
-  console.log("Using categoryId for filter:", categoryId);
 
   if (q) {
     // Use case-insensitive regex for substring search on name and description
@@ -160,10 +141,8 @@ exports.advancedSearch = async (req, res) => {
       });
     }
     findChildren(categoryId);
-    console.log("Child categories:", childCategories);
     filter.category = { $in: [categoryId, ...childCategories] };
   }
-  console.log("Final product filter:", filter);
 
   const skip = (Number(page) - 1) * Number(limit);
 
@@ -174,59 +153,52 @@ exports.advancedSearch = async (req, res) => {
     sortObj["createdAt"] = -1;
   }
 
-  try {
-    const products = await Product.find(filter)
-      .sort(sortObj)
-      .skip(skip)
-      .limit(Number(limit))
-      .populate(["category", "additionalCategories"]);
-    const total = await Product.countDocuments(filter);
+  const products = await Product.find(filter)
+    .sort(sortObj)
+    .skip(skip)
+    .limit(Number(limit))
+    .populate(["category", "additionalCategories"]);
+  const total = await Product.countDocuments(filter);
 
-    // Fetch review stats for all products in the result
-    const productIds = products.map((p) => p._id);
-    const reviewStats = await Review.aggregate([
-      { $match: { product: { $in: productIds } } },
-      {
-        $group: {
-          _id: "$product",
-          average: { $avg: "$rating" },
-          count: { $sum: 1 },
-        },
+  // Fetch review stats for all products in the result
+  const productIds = products.map((p) => p._id);
+  const reviewStats = await Review.aggregate([
+    { $match: { product: { $in: productIds } } },
+    {
+      $group: {
+        _id: "$product",
+        average: { $avg: "$rating" },
+        count: { $sum: 1 },
       },
-    ]);
-    const reviewMap = {};
-    reviewStats.forEach((stat) => {
-      reviewMap[stat._id.toString()] = {
-        average: stat.average || 0,
-        count: stat.count || 0,
-      };
-    });
-    // Attach review stats to each product
-    const productsWithReviews = products.map((p) => {
-      const stats = reviewMap[p._id.toString()] || { average: 0, count: 0 };
-      return {
-        ...p.toObject(),
-        averageRating: stats.average,
-        reviewCount: stats.count,
-      };
-    });
+    },
+  ]);
+  const reviewMap = {};
+  reviewStats.forEach((stat) => {
+    reviewMap[stat._id.toString()] = {
+      average: stat.average || 0,
+      count: stat.count || 0,
+    };
+  });
+  // Attach review stats to each product
+  const productsWithReviews = products.map((p) => {
+    const stats = reviewMap[p._id.toString()] || { average: 0, count: 0 };
+    return {
+      ...p.toObject(),
+      averageRating: stats.average,
+      reviewCount: stats.count,
+    };
+  });
 
-    res.json({
-      total,
-      page: Number(page),
-      pageSize: products.length,
-      products: productsWithReviews,
-    });
-  } catch (err) {
-    console.error("Product search error:", err);
-    res
-      .status(500)
-      .json({ message: "Internal server error", error: err.message });
-  }
-};
+  res.json({
+    total,
+    page: Number(page),
+    pageSize: products.length,
+    products: productsWithReviews,
+  });
+});
 
 // Change product status (admin only)
-exports.changeStatus = async (req, res) => {
+exports.changeStatus = catchAsync(async (req, res) => {
   const product = req.product;
   const { status } = req.body;
   const allowed = [
@@ -237,15 +209,15 @@ exports.changeStatus = async (req, res) => {
     "draft",
   ];
   if (!allowed.includes(status)) {
-    return res.status(400).json({ message: "Invalid status value." });
+    throw new ApiError(400, "Invalid status value.");
   }
   product.status = status;
   await product.save();
   res.json(product);
-};
+});
 
 // Get all products under a parent category (including descendants)
-exports.getByParentCategory = async (req, res) => {
+exports.getByParentCategory = catchAsync(async (req, res) => {
   const { parentCategoryId } = req.params;
   const Category = require("../models/category");
   // Find all categories
@@ -268,12 +240,11 @@ exports.getByParentCategory = async (req, res) => {
     category: { $in: categoryIds },
   }).populate(["category", "additionalCategories"]);
   res.json(products);
-};
+});
 
 // Fast single-query: Get all products under a parent category (including descendants) by ObjectId or slug
-exports.getByParentCategoryFast = async (req, res) => {
+exports.getByParentCategoryFast = catchAsync(async (req, res) => {
   const { parentCategoryIdOrSlug } = req.params;
-  console.log("Received parentCategoryIdOrSlug:", parentCategoryIdOrSlug);
   const Category = require("../models/category");
   let parentCategory;
   let parentId;
@@ -281,11 +252,8 @@ exports.getByParentCategoryFast = async (req, res) => {
   if (/^[0-9a-fA-F]{24}$/.test(parentCategoryIdOrSlug)) {
     try {
       parentId = new mongoose.Types.ObjectId(parentCategoryIdOrSlug);
-      console.log("Converted to ObjectId:", parentId);
       parentCategory = await Category.findById(parentId);
-      console.log("parentCategory from DB:", parentCategory);
     } catch (err) {
-      console.error("Error during ObjectId conversion or findById:", err);
       return res
         .status(400)
         .json({ message: "Invalid category ObjectId.", error: err.message });
@@ -332,10 +300,10 @@ exports.getByParentCategoryFast = async (req, res) => {
     category: { $in: allCategoryIds },
   }).populate(["category", "additionalCategories"]);
   res.json(products);
-};
+});
 
 // Create or update a review for a product
-exports.createOrUpdateReview = async (req, res) => {
+exports.createOrUpdateReview = catchAsync(async (req, res) => {
   const { productId, rating } = req.body;
   if (!productId || !rating) {
     return res
@@ -351,10 +319,10 @@ exports.createOrUpdateReview = async (req, res) => {
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
   res.status(201).json(review);
-};
+});
 
 // Get all reviews for a product (with average rating and count)
-exports.getReviewsForProduct = async (req, res) => {
+exports.getReviewsForProduct = catchAsync(async (req, res) => {
   const productId = req.params.id;
   const reviews = await Review.find({ product: productId }).populate(
     "user",
@@ -368,4 +336,4 @@ exports.getReviewsForProduct = async (req, res) => {
     average: avg,
     reviews,
   });
-};
+});
