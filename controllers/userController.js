@@ -1,5 +1,6 @@
 const User = require("../models/user");
 const ApiError = require("../utils/ApiError");
+const bcrypt = require("bcrypt");
 
 // List all users (admin only)
 exports.list = async (req, res) => {
@@ -23,12 +24,14 @@ exports.getById = async (req, res) => {
 exports.update = async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) throw new ApiError(404, "User not found.");
-  const { name, email, role, address, status } = req.body;
+  const { name, email, role, address, status, mobile, password } = req.body;
   if (name) user.name = name;
   if (email) user.email = email;
   if (role) user.role = role;
   if (address) user.address = address;
   if (status) user.status = status;
+  if (mobile) user.mobile = mobile;
+  if (password) user.password = await bcrypt.hash(password, 10);
   await user.save();
   const userObj = user.toObject();
   delete userObj.password;

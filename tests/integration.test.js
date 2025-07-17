@@ -31,14 +31,21 @@ beforeAll(async () => {
     email: "admin@test.com",
   });
   // Create store
-  await request(server).post("/api/auth/register").send({
-    name: "Store",
-    mobile: "2000000000",
-    password: "storepass",
-    role: "store",
-    address: "123 Main St",
-    email: "store@test.com",
-  });
+  await request(server)
+    .post("/api/auth/register")
+    .send({
+      name: "Store",
+      mobile: "2000000000",
+      password: "storepass",
+      role: "store",
+      address: {
+        address: "123 Main St",
+        city: "Testville",
+        state: "TS",
+        zipCode: "12345",
+      },
+      email: "store@test.com",
+    });
   // Create delivery
   await request(server).post("/api/auth/register").send({
     name: "Delivery",
@@ -185,5 +192,61 @@ describe("Order Cancellation", () => {
             res.body.statusHistory[res.body.statusHistory.length - 1].changedBy,
       ),
     ).toBe(true);
+  });
+});
+
+describe("Order Soft Delete & Admin Order Creation", () => {
+  let storeUserId, adminOrderId, softDeleteOrderId;
+
+  beforeAll(async () => {
+    // Get store user id
+    const storeUser = await User.findOne({ mobile: "2000000000" });
+    storeUserId = storeUser._id;
+    // Place an order as store (to be soft deleted)
+    const res = await request(server)
+      .post("/api/orders")
+      .set("Authorization", `Bearer ${storeToken}`)
+      .send({ products: [{ product: productId, quantity: 1 }] });
+    softDeleteOrderId = res.body._id;
+  });
+
+  test("Soft delete order hides it from queries", async () => {
+    // Soft delete the order
+    const resDel = await request(server)
+      .delete(`/api/orders/${softDeleteOrderId}`)
+      .set("Authorization", `Bearer ${storeToken}`);
+    expect(resDel.statusCode).toBe(200);
+    // Should not appear in store's order list
+    const resList = await request(server)
+      .get("/api/orders/my")
+      .set("Authorization", `Bearer ${storeToken}`);
+    expect(resList.body.some((o) => o._id === softDeleteOrderId)).toBe(false);
+  });
+
+  test("Admin can create order for store, address fallback works", async () => {
+    // Remove address from store user
+    await User.findByIdAndUpdate(storeUserId, { $unset: { address: "" } });
+    // Try to create order without address (should fail)
+    const resFail = await request(server)
+      .post("/api/orders")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        products: [{ product: productId, quantity: 1 }],
+        store: storeUserId,
+      });
+    expect(resFail.statusCode).toBe(400);
+    // Add address back
+    await User.findByIdAndUpdate(storeUserId, { address: "456 Admin St" });
+    // Now create order as admin for store (should succeed, use store's address)
+    const res = await request(server)
+      .post("/api/orders")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        products: [{ product: productId, quantity: 1 }],
+        store: storeUserId,
+      });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.address).toBe("456 Admin St");
+    adminOrderId = res.body._id;
   });
 });

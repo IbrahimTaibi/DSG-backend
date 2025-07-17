@@ -4,6 +4,7 @@ const authController = require("../controllers/authController");
 const catchAsync = require("../utils/catchAsync");
 const { validate } = require("../middleware/validate");
 const auth = require("../middleware/auth");
+const role = require("../middleware/role");
 
 router.post(
   "/register",
@@ -26,6 +27,13 @@ router.put(
   "/notifications/read/all",
   auth,
   catchAsync(authController.markAllNotificationsRead),
+);
+router.post(
+  "/admin-create",
+  auth,
+  role("admin"),
+  validate(authController.registerSchema),
+  catchAsync(authController.register),
 );
 
 module.exports = router;
