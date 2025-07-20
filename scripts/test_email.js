@@ -10,7 +10,7 @@ console.log("Starting test email script...");
 (async () => {
   try {
     await sendEmail({
-      to: process.env.SMTP_USER,
+      to: "darkmageon@gmail.com",
       subject: "Test Email from DSG Backend",
       html: "<p>This is a test email to confirm your email configuration is working.</p>",
     });

@@ -109,5 +109,10 @@ router.put(
 
 // Get order by ID
 router.get("/:id", auth, catchAsync(orderController.getOrderById));
+router.get(
+  "/:orderId/invoice",
+  auth,
+  catchAsync(orderController.getInvoiceByOrderId),
+);
 
 module.exports = router;

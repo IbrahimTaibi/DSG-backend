@@ -3,6 +3,7 @@ const ApiError = require("../utils/ApiError");
 const mongoose = require("mongoose");
 const Review = require("../models/review");
 const catchAsync = require("../utils/catchAsync");
+const Invoice = require("../models/invoice");
 
 // Create product (admin only)
 exports.create = catchAsync(async (req, res) => {
@@ -14,9 +15,37 @@ exports.create = catchAsync(async (req, res) => {
     category,
     additionalCategories,
     image,
+    tax,
   } = req.body;
-  if (!name || !price || !category)
-    throw new ApiError(400, "Name, price, and category are required.");
+  if (!name || !price || !category || !tax)
+    throw new ApiError(400, "Name, price, category, and tax are required.");
+
+  // Validate tax exists
+  const Tax = require("../models/tax");
+  const taxDoc = await Tax.findById(tax);
+  if (!taxDoc) throw new ApiError(400, "Invalid tax ID.");
+
+  // Fetch all parent categories of the main category
+  const Category = require("../models/category");
+  let parentCategories = [];
+  let currentCategory = await Category.findById(category);
+  while (currentCategory && currentCategory.parent) {
+    parentCategories.push(currentCategory.parent);
+    currentCategory = await Category.findById(currentCategory.parent);
+  }
+
+  // Merge provided additionalCategories (if any) and remove duplicates and the main category
+  let allAdditionalCategories = [
+    ...(additionalCategories || []),
+    ...parentCategories.map((id) => id.toString()),
+  ];
+  allAdditionalCategories = Array.from(
+    new Set(
+      allAdditionalCategories.filter(
+        (catId) => catId.toString() !== category.toString(),
+      ),
+    ),
+  );
 
   const product = new Product({
     name,
@@ -24,8 +53,9 @@ exports.create = catchAsync(async (req, res) => {
     price,
     stock,
     category,
-    additionalCategories: additionalCategories || [],
+    additionalCategories: allAdditionalCategories,
     image,
+    tax,
   });
   await product.save();
   res.status(201).json(product);
@@ -33,10 +63,9 @@ exports.create = catchAsync(async (req, res) => {
 
 // Get all products
 exports.getAll = catchAsync(async (req, res) => {
-  const products = await Product.find().populate([
-    "category",
-    "additionalCategories",
-  ]);
+  const products = await Product.find()
+    .lean()
+    .populate(["category", "additionalCategories"]);
   res.json(products);
 });
 
@@ -46,7 +75,7 @@ exports.getById = catchAsync(async (req, res) => {
     "category",
     "additionalCategories",
   ]);
-  res.json(product);
+  res.json(product.toObject ? product.toObject() : product);
 });
 
 // Update product (admin only)
@@ -60,6 +89,7 @@ exports.update = catchAsync(async (req, res) => {
     category,
     additionalCategories,
     image,
+    tax,
   } = req.body;
 
   if (name) product.name = name;
@@ -76,6 +106,12 @@ exports.update = catchAsync(async (req, res) => {
   if (category) product.category = category;
   if (additionalCategories) product.additionalCategories = additionalCategories;
   if (image) product.image = image;
+  if (tax) {
+    const Tax = require("../models/tax");
+    const taxDoc = await Tax.findById(tax);
+    if (!taxDoc) throw new ApiError(400, "Invalid tax ID.");
+    product.tax = tax;
+  }
 
   await product.save();
   res.json(product);
@@ -157,6 +193,7 @@ exports.advancedSearch = catchAsync(async (req, res) => {
     .sort(sortObj)
     .skip(skip)
     .limit(Number(limit))
+    .lean()
     .populate(["category", "additionalCategories"]);
   const total = await Product.countDocuments(filter);
 
@@ -183,7 +220,7 @@ exports.advancedSearch = catchAsync(async (req, res) => {
   const productsWithReviews = products.map((p) => {
     const stats = reviewMap[p._id.toString()] || { average: 0, count: 0 };
     return {
-      ...p.toObject(),
+      ...p,
       averageRating: stats.average,
       reviewCount: stats.count,
     };

@@ -22,6 +22,7 @@ const productSchema = new mongoose.Schema(
       { type: mongoose.Schema.Types.ObjectId, ref: "Category", index: true },
     ], // Optional
     image: { type: String }, // URL or path
+    tax: { type: mongoose.Schema.Types.ObjectId, ref: "Tax", required: true }, // Reference to Tax
   },
   { timestamps: true },
 );

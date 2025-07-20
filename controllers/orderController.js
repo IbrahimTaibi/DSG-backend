@@ -10,6 +10,7 @@ const {
   emitNotification,
   emitNotificationToUsers,
 } = require("../utils/notificationEmitter");
+const Invoice = require("../models/invoice");
 
 // Helper to format order details as HTML
 function orderHtml(order, products) {
@@ -37,6 +38,22 @@ function orderHtml(order, products) {
       </div>
     </div>
   `;
+}
+
+async function generateNextInvoiceNumber() {
+  const year = new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  const lastInvoice = await require("../models/invoice")
+    .findOne({ invoiceNumber: { $regex: `^${prefix}` } })
+    .sort({ invoiceNumber: -1 });
+  let nextNumber = 1;
+  if (lastInvoice && lastInvoice.invoiceNumber) {
+    const match = lastInvoice.invoiceNumber.match(/INV-\d{4}-(\d+)/);
+    if (match) {
+      nextNumber = parseInt(match[1], 10) + 1;
+    }
+  }
+  return `${prefix}${String(nextNumber).padStart(5, "0")}`;
 }
 
 // Store: Place order
@@ -124,7 +141,8 @@ exports.getMyOrders = async (req, res) => {
     deleted: { $ne: true },
   })
     .populate("products.product")
-    .sort("-createdAt");
+    .sort("-createdAt")
+    .lean();
   res.json(orders);
 };
 
@@ -132,7 +150,8 @@ exports.getMyOrders = async (req, res) => {
 exports.getAll = async (req, res) => {
   const orders = await Order.find({ deleted: { $ne: true } })
     .populate("store assignedTo products.product")
-    .sort("-createdAt");
+    .sort("-createdAt")
+    .lean();
   res.json(orders);
 };
 
@@ -239,6 +258,79 @@ exports.updateStatus = async (req, res) => {
     changedAt: new Date(),
   });
   await order.save();
+
+  // Generate invoice if delivered and not already created
+  if (status === "delivered") {
+    console.log(
+      `[INVOICE] Order ${order._id} marked as delivered by admin, checking for existing invoice`,
+    );
+    const existingInvoice = await Invoice.findOne({ order: order._id });
+    if (!existingInvoice) {
+      console.log(
+        `[INVOICE] No existing invoice found, creating new invoice for order ${order._id}`,
+      );
+      try {
+        // Populate products and store
+        await order.populate({
+          path: "products.product",
+          populate: { path: "tax" },
+        });
+        await order.populate("store");
+        let subtotal = 0;
+        let totalTax = 0;
+        const products = order.products.map((op) => {
+          const taxRate = op.product.tax ? op.product.tax.rate : 0;
+          const lineTotal = op.price * op.quantity; // This is already TTC
+          const taxAmount =
+            taxRate > 0 ? (lineTotal * taxRate) / (100 + taxRate) : 0;
+          const lineSubtotal = lineTotal - taxAmount;
+          subtotal += lineSubtotal;
+          totalTax += taxAmount;
+          return {
+            product: op.product._id,
+            name: op.product.name,
+            quantity: op.quantity,
+            price: op.price,
+            tax: taxAmount, // Store tax amount as number
+            total: lineTotal,
+          };
+        });
+        const invoiceNumber = await generateNextInvoiceNumber();
+        console.log(`[INVOICE] Generated invoice number: ${invoiceNumber}`);
+        const invoice = new Invoice({
+          order: order._id,
+          products,
+          subtotal,
+          totalTax,
+          total: subtotal + totalTax,
+          customer: {
+            id: order.store._id,
+            name: order.store.name,
+            email: order.store.email,
+            address: order.address || order.store.address,
+          },
+          invoiceNumber,
+          issuedAt: new Date(),
+          status: "issued",
+        });
+        await invoice.save();
+        console.log(
+          `[INVOICE] Successfully created invoice ${invoice._id} for order ${order._id}`,
+        );
+      } catch (error) {
+        console.error(
+          `[INVOICE] Error creating invoice for order ${order._id}:`,
+          error,
+        );
+        throw error;
+      }
+    } else {
+      console.log(
+        `[INVOICE] Invoice already exists for order ${order._id}: ${existingInvoice._id}`,
+      );
+    }
+  }
+
   res.json(order);
 };
 
@@ -353,7 +445,8 @@ exports.getAssigned = async (req, res) => {
     deleted: { $ne: true },
   })
     .populate("store products.product")
-    .sort("-createdAt");
+    .sort("-createdAt")
+    .lean();
   res.json(orders);
 };
 
@@ -377,6 +470,78 @@ exports.deliveryUpdateStatus = async (req, res) => {
     changedAt: new Date(),
   });
   await order.save();
+
+  // Generate invoice if delivered and not already created
+  if (status === "delivered") {
+    console.log(
+      `[INVOICE] Order ${order._id} marked as delivered, checking for existing invoice`,
+    );
+    const existingInvoice = await Invoice.findOne({ order: order._id });
+    if (!existingInvoice) {
+      console.log(
+        `[INVOICE] No existing invoice found, creating new invoice for order ${order._id}`,
+      );
+      try {
+        // Populate products and store
+        await order.populate({
+          path: "products.product",
+          populate: { path: "tax" },
+        });
+        await order.populate("store");
+        let subtotal = 0;
+        let totalTax = 0;
+        const products = order.products.map((op) => {
+          const taxRate = op.product.tax ? op.product.tax.rate : 0;
+          const lineTotal = op.price * op.quantity; // This is already TTC
+          const taxAmount =
+            taxRate > 0 ? (lineTotal * taxRate) / (100 + taxRate) : 0;
+          const lineSubtotal = lineTotal - taxAmount;
+          subtotal += lineSubtotal;
+          totalTax += taxAmount;
+          return {
+            product: op.product._id,
+            name: op.product.name,
+            quantity: op.quantity,
+            price: op.price,
+            tax: taxAmount, // Store tax amount as number
+            total: lineTotal,
+          };
+        });
+        const invoiceNumber = await generateNextInvoiceNumber();
+        console.log(`[INVOICE] Generated invoice number: ${invoiceNumber}`);
+        const invoice = new Invoice({
+          order: order._id,
+          products,
+          subtotal,
+          totalTax,
+          total: subtotal + totalTax,
+          customer: {
+            id: order.store._id,
+            name: order.store.name,
+            email: order.store.email,
+            address: order.address || order.store.address,
+          },
+          invoiceNumber,
+          issuedAt: new Date(),
+          status: "issued",
+        });
+        await invoice.save();
+        console.log(
+          `[INVOICE] Successfully created invoice ${invoice._id} for order ${order._id}`,
+        );
+      } catch (error) {
+        console.error(
+          `[INVOICE] Error creating invoice for order ${order._id}:`,
+          error,
+        );
+        throw error;
+      }
+    } else {
+      console.log(
+        `[INVOICE] Invoice already exists for order ${order._id}: ${existingInvoice._id}`,
+      );
+    }
+  }
   res.json(order);
 };
 
@@ -555,7 +720,8 @@ exports.getOrderById = async (req, res) => {
 
   const order = await Order.findOne(query)
     .populate("products.product")
-    .populate("store assignedTo");
+    .populate("store assignedTo")
+    .lean();
 
   if (!order) return res.status(404).json({ message: "Order not found" });
 
@@ -655,4 +821,36 @@ exports.deleteOrder = catchAsync(async (req, res) => {
   order.deleted = true;
   await order.save();
   res.json({ message: "Order soft deleted.", order });
+});
+
+exports.getInvoiceByOrderId = catchAsync(async (req, res) => {
+  const { orderId } = req.params;
+  const Invoice = require("../models/invoice");
+  const Order = require("../models/order");
+  const invoice = await Invoice.findOne({ order: orderId }).populate({
+    path: "products.product products.tax customer.id order",
+  });
+  if (!invoice) throw new ApiError(404, "Invoice not found for this order.");
+
+  // Security: Only allow
+  // - Admins: any invoice
+  // - Delivery: only if assigned and delivered
+  // - Others: forbidden
+  const user = req.user;
+  if (user.role === "admin") {
+    return res.json(invoice);
+  }
+  if (user.role === "delivery") {
+    const order = await Order.findById(orderId);
+    if (!order) throw new ApiError(404, "Order not found.");
+    if (
+      String(order.assignedTo) === String(user._id) &&
+      order.status === "delivered"
+    ) {
+      return res.json(invoice);
+    } else {
+      throw new ApiError(403, "Not authorized to access this invoice.");
+    }
+  }
+  throw new ApiError(403, "Not authorized to access this invoice.");
 });

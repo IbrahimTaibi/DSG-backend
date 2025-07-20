@@ -1,11 +1,192 @@
 openapi: 3.0.0
 info:
   title: DSG Backend API
-  version: 1.0.0
-  description: API documentation for the DSG Backend (local services marketplace)
+  version: 1.1.0
+  description: Full API documentation for the DSG Backend (Tunisian marketplace)
 servers:
   - url: http://localhost:5010
     description: Local server
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    UserRegister:
+      type: object
+      properties:
+        name: { type: string }
+        mobile: { type: string }
+        password: { type: string }
+        email: { type: string }
+        address: { type: string }
+        role: { type: string }
+      required: [name, mobile, password]
+    UserLogin:
+      type: object
+      properties:
+        mobile: { type: string }
+        password: { type: string }
+      required: [mobile, password]
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mobile: { type: string }
+        email: { type: string }
+        role: { type: string }
+        address: { type: string }
+    TaxCreate:
+      type: object
+      properties:
+        name: { type: string }
+        rate: { type: number }
+        code: { type: string }
+        description: { type: string }
+        active: { type: boolean }
+        type: { type: string }
+      required: [name, rate, code]
+    Tax:
+      allOf:
+        - $ref: "#/components/schemas/TaxCreate"
+        - type: object
+          properties:
+            id: { type: string }
+    ProductCreate:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        price: { type: number }
+        stock: { type: number }
+        category: { type: string }
+        additionalCategories:
+          type: array
+          items: { type: string }
+        image: { type: string }
+        tax: { type: string }
+      required: [name, price, category, tax]
+    Product:
+      allOf:
+        - $ref: "#/components/schemas/ProductCreate"
+        - type: object
+          properties:
+            id: { type: string }
+    CategoryCreate:
+      type: object
+      properties:
+        name: { type: string }
+        parent: { type: string }
+      required: [name]
+    Category:
+      allOf:
+        - $ref: "#/components/schemas/CategoryCreate"
+        - type: object
+          properties:
+            id: { type: string }
+    CategoryTree:
+      allOf:
+        - $ref: "#/components/schemas/Category"
+        - type: object
+          properties:
+            children:
+              type: array
+              items:
+                $ref: "#/components/schemas/CategoryTree"
+    OrderProduct:
+      type: object
+      properties:
+        product: { type: string }
+        quantity: { type: number }
+        price: { type: number }
+    OrderCreate:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderProduct"
+        address: { type: string }
+        store: { type: string }
+      required: [products]
+    Order:
+      type: object
+      properties:
+        id: { type: string }
+        store: { type: string }
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderProduct"
+        total: { type: number }
+        status: { type: string }
+        assignedTo: { type: string }
+        paymentMethod: { type: string }
+        cancellationReason: { type: string }
+        statusHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { type: string }
+              changedBy: { type: string }
+              changedAt: { type: string, format: date-time }
+        address: { type: string }
+    InvoiceUpdate:
+      type: object
+      properties:
+        status: { type: string }
+        paidAt: { type: string, format: date-time }
+        sentAt: { type: string, format: date-time }
+    Invoice:
+      type: object
+      properties:
+        id: { type: string }
+        order: { type: string }
+        invoiceNumber: { type: string }
+        issuedAt: { type: string, format: date-time }
+        paidAt: { type: string, format: date-time }
+        sentAt: { type: string, format: date-time }
+        status: { type: string }
+        products:
+          type: array
+          items:
+            type: object
+            properties:
+              product: { type: string }
+              name: { type: string }
+              quantity: { type: number }
+              price: { type: number }
+              tax:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  rate: { type: number }
+              taxAmount: { type: number }
+              total: { type: number }
+        subtotal: { type: number }
+        totalTax: { type: number }
+        total: { type: number }
+        customer:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            email: { type: string }
+            address: { type: string }
+    Message:
+      type: object
+      properties:
+        id: { type: string }
+        sender: { type: string }
+        receiver: { type: string }
+        content: { type: string }
+        timestamp: { type: string, format: date-time }
+        order: { type: string }
+
 paths:
   /api/auth/register:
     post:
@@ -17,12 +198,9 @@ paths:
             schema:
               $ref: "#/components/schemas/UserRegister"
       responses:
-        "201":
-          description: User registered successfully
-        "400":
-          description: Validation error
-        "409":
-          description: Mobile already registered
+        "201": { description: User registered successfully }
+        "400": { description: Validation error }
+        "409": { description: Mobile already registered }
   /api/auth/login:
     post:
       summary: Login user
@@ -33,17 +211,8 @@ paths:
             schema:
               $ref: "#/components/schemas/UserLogin"
       responses:
-        "200":
-          description: Login successful
-        "401":
-          description: Invalid credentials
-  /api/auth/google:
-    post:
-      summary: Google authentication (not implemented)
-      responses:
-        "501":
-          description: Not implemented
-
+        "200": { description: Login successful }
+        "401": { description: Invalid credentials }
   /api/products:
     get:
       summary: Get all products
@@ -58,6 +227,8 @@ paths:
                   $ref: "#/components/schemas/Product"
     post:
       summary: Create a new product (admin only)
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -71,8 +242,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
-        "400":
-          description: Validation error
+        "400": { description: Validation error }
   /api/products/{id}:
     get:
       summary: Get product by ID
@@ -89,10 +259,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
-        "404":
-          description: Product not found
+        "404": { description: Product not found }
     put:
       summary: Update product (admin only)
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: id
@@ -112,10 +283,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
-        "404":
-          description: Product not found
+        "404": { description: Product not found }
     delete:
       summary: Delete product (admin only)
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: id
@@ -123,55 +295,59 @@ paths:
             type: string
           required: true
       responses:
-        "200":
-          description: Product deleted
-        "404":
-          description: Product not found
-
-  /api/categories:
+        "200": { description: Product deleted }
+        "404": { description: Product not found }
+  /api/taxes:
     get:
-      summary: Get all categories
+      summary: Get all taxes
       responses:
         "200":
-          description: List of categories
+          description: List of taxes
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Category"
+                  $ref: "#/components/schemas/Tax"
     post:
-      summary: Create a new category (admin only)
+      summary: Create a new tax (admin only)
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CategoryCreate"
+              $ref: "#/components/schemas/TaxCreate"
       responses:
         "201":
-          description: Category created
+          description: Tax created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Category"
-        "400":
-          description: Validation error
-  /api/categories/tree:
+                $ref: "#/components/schemas/Tax"
+        "400": { description: Validation error }
+  /api/taxes/{id}:
     get:
-      summary: Get category tree (nested)
+      summary: Get tax by ID
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
       responses:
         "200":
-          description: Nested category tree
+          description: Tax details
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/CategoryTree"
-  /api/categories/{id}:
+                $ref: "#/components/schemas/Tax"
+        "404": { description: Tax not found }
     put:
-      summary: Update category (admin only)
+      summary: Update tax (admin only)
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: id
@@ -183,18 +359,47 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CategoryCreate"
+              $ref: "#/components/schemas/TaxCreate"
       responses:
         "200":
-          description: Category updated
+          description: Tax updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Category"
-        "404":
-          description: Category not found
+                $ref: "#/components/schemas/Tax"
+        "404": { description: Tax not found }
     delete:
-      summary: Delete category (admin only)
+      summary: Delete tax (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "200": { description: Tax deleted }
+        "404": { description: Tax not found }
+  /api/invoices:
+    get:
+      summary: List all invoices (admin only)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Invoice"
+  /api/invoices/{id}:
+    get:
+      summary: Get invoice by ID (admin only)
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: id
@@ -203,16 +408,54 @@ paths:
           required: true
       responses:
         "200":
-          description: Category deleted
-        "404":
-          description: Category not found
-
+          description: Invoice details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "404": { description: Invoice not found }
+    put:
+      summary: Update invoice (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvoiceUpdate"
+      responses:
+        "200":
+          description: Invoice updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "404": { description: Invoice not found }
+    delete:
+      summary: Delete invoice (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "200": { description: Invoice deleted }
+        "404": { description: Invoice not found }
   /api/orders:
     post:
       summary: Place a new order (store only)
-      description: |
-        Places a new order for the authenticated store user. 
-        The user will receive an email notification with order details upon successful order placement.
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -226,10 +469,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Order"
-        "400":
-          description: Validation error
+        "400": { description: Validation error }
     get:
       summary: Get all orders (admin only)
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: List of orders
@@ -239,87 +483,64 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Order"
-  /api/orders/my:
+  /api/orders/{orderId}/invoice:
     get:
-      summary: Get own orders (store only)
+      summary: Get invoice by order ID (admin or assigned delivery, delivered only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: orderId
+          schema:
+            type: string
+          required: true
       responses:
         "200":
-          description: List of own orders
+          description: Invoice details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "403": { description: Not authorized }
+        "404": { description: Invoice not found }
+  /api/users:
+    get:
+      summary: List all users (admin only)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of users
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Order"
-  /api/orders/{id}/assign:
-    put:
-      summary: Assign delivery guy (admin only)
-      parameters:
-        - in: path
-          name: id
-          schema:
-            type: string
-          required: true
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                deliveryGuyId:
-                  type: string
-      responses:
-        "200":
-          description: Order updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Order"
-        "404":
-          description: Order not found
-  /api/orders/{id}/status:
-    put:
-      summary: Update order status (admin only)
-      parameters:
-        - in: path
-          name: id
-          schema:
-            type: string
-          required: true
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                status:
-                  type: string
-      responses:
-        "200":
-          description: Order status updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Order"
-        "404":
-          description: Order not found
-  /api/orders/assigned:
+                  $ref: "#/components/schemas/User"
+
+  /api/users/{id}:
     get:
-      summary: Get assigned orders (delivery only)
+      summary: Get user by ID (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
       responses:
         "200":
-          description: List of assigned orders
+          description: User details
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Order"
-  /api/orders/{id}/deliverystatus:
+                $ref: "#/components/schemas/User"
+        "404": { description: User not found }
     put:
-      summary: Update delivery status (delivery only)
+      summary: Update user by ID (admin only)
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: id
@@ -331,52 +552,89 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                status:
-                  type: string
+              $ref: "#/components/schemas/User"
       responses:
         "200":
-          description: Delivery status updated
+          description: User updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Order"
-        "404":
-          description: Order not found
-  /api/orders/{id}/cancel:
-    put:
-      summary: Cancel order (admin, store, delivery)
-      description: |
-        Cancels an order by ID. The user who placed the order will receive an email notification with the cancellation reason and order details.
+                $ref: "#/components/schemas/User"
+        "404": { description: User not found }
+    delete:
+      summary: Delete user by ID (admin only)
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: id
           schema:
             type: string
           required: true
+      responses:
+        "200": { description: User deleted }
+        "404": { description: User not found }
+
+  /api/reviews:
+    post:
+      summary: Create or update a review for a product (authenticated)
+      security:
+        - bearerAuth: []
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
               properties:
-                reason:
-                  type: string
+                productId: { type: string }
+                rating: { type: number }
       responses:
-        "200":
-          description: Order cancelled
+        "201":
+          description: Review created/updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Order"
-        "404":
-          description: Order not found
+                type: object
+                properties:
+                  id: { type: string }
+                  product: { type: string }
+                  user: { type: string }
+                  rating: { type: number }
+
+  /api/products/{id}/reviews:
+    get:
+      summary: Get all reviews for a product
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: List of reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  average: { type: number }
+                  reviews:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        user: { type: string }
+                        rating: { type: number }
 
   /api/messages/store/delivery:
     post:
-      summary: Store sends message to delivery guy (live, order-based)
+      summary: Store sends message to delivery guy (order-based)
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -384,22 +642,17 @@ paths:
             schema:
               type: object
               properties:
-                orderId:
-                  type: string
-                content:
-                  type: string
+                orderId: { type: string }
+                content: { type: string }
       responses:
-        "201":
-          description: Message sent
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Message"
-        "400":
-          description: Validation or business logic error
+        "201": { description: Message sent }
+        "400": { description: Validation or business logic error }
+
   /api/messages/store/admin:
     post:
-      summary: Store sends message to admin (REST only)
+      summary: Store sends message to admin
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -407,20 +660,33 @@ paths:
             schema:
               type: object
               properties:
-                content:
-                  type: string
+                content: { type: string }
       responses:
-        "201":
-          description: Message sent
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Message"
-        "400":
-          description: Validation or business logic error
+        "201": { description: Message sent }
+        "400": { description: Validation or business logic error }
+
+  /api/messages/store/support:
+    post:
+      summary: Store sends message to support
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { type: string }
+      responses:
+        "201": { description: Message sent }
+        "400": { description: Validation or business logic error }
+
   /api/messages/delivery/admin:
     post:
-      summary: Delivery guy sends message to admin (live)
+      summary: Delivery guy sends message to admin
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -428,20 +694,52 @@ paths:
             schema:
               type: object
               properties:
-                content:
-                  type: string
+                content: { type: string }
       responses:
-        "201":
-          description: Message sent
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Message"
-        "400":
-          description: Validation or business logic error
+        "201": { description: Message sent }
+        "400": { description: Validation or business logic error }
+
+  /api/messages/delivery/delivery:
+    post:
+      summary: Delivery guy sends message to another delivery
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deliveryId: { type: string }
+                content: { type: string }
+      responses:
+        "201": { description: Message sent }
+        "400": { description: Validation or business logic error }
+
+  /api/messages/admin/user:
+    post:
+      summary: Admin sends message to any user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId: { type: string }
+                content: { type: string }
+      responses:
+        "201": { description: Message sent }
+        "400": { description: Validation or business logic error }
+
   /api/messages/history/{userId}:
     get:
       summary: Fetch chat history between two users
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: userId
@@ -457,14 +755,60 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Message"
-        "403":
-          description: Not allowed to view this chat
+        "403": { description: Not allowed to view this chat }
+
+  /api/categories/tree:
+    get:
+      summary: Get category tree (nested)
+      responses:
+        "200":
+          description: Nested category tree
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryTree"
+
+  /api/categories/{slug}:
+    get:
+      summary: Get category by slug
+      parameters:
+        - in: path
+          name: slug
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Category details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "404": { description: Category not found }
+
+  /api/categories/path/{slugPath}:
+    get:
+      summary: Get category by full slug path (nested)
+      parameters:
+        - in: path
+          name: slugPath
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Category details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "404": { description: Category not found }
 
   /api/products/search:
     get:
       summary: Advanced search for products
-      description: >
-        Search products by text, category, price range, stock, and sort/paginate results.
       parameters:
         - in: query
           name: q
@@ -523,182 +867,121 @@ paths:
               schema:
                 type: object
                 properties:
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  pageSize:
-                    type: integer
+                  total: { type: integer }
+                  page: { type: integer }
+                  pageSize: { type: integer }
                   products:
                     type: array
                     items:
                       $ref: "#/components/schemas/Product"
 
-components:
-  schemas:
-    UserRegister:
-      type: object
-      properties:
-        name:
-          type: string
-        mobile:
-          type: string
-        password:
-          type: string
-        email:
-          type: string
-        address:
-          type: string
-        role:
-          type: string
-      required:
-        - name
-        - mobile
-        - password
-    UserLogin:
-      type: object
-      properties:
-        mobile:
-          type: string
-        password:
-          type: string
-      required:
-        - mobile
-        - password
-    User:
-      type: object
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        mobile:
-          type: string
-        email:
-          type: string
-        role:
-          type: string
-        address:
-          type: string
-    ProductCreate:
-      type: object
-      properties:
-        name:
-          type: string
-        description:
-          type: string
-        price:
-          type: number
-        stock:
-          type: number
-        category:
-          type: string
-        additionalCategories:
-          type: array
-          items:
+  /api/products/advancedSearch:
+    get:
+      summary: Alias for advanced search for products
+      parameters:
+        - in: query
+          name: q
+          schema:
             type: string
-        image:
-          type: string
-      required:
-        - name
-        - price
-        - category
-    Product:
-      allOf:
-        - $ref: "#/components/schemas/ProductCreate"
-        - type: object
-          properties:
-            id:
-              type: string
-    CategoryCreate:
-      type: object
-      properties:
-        name:
-          type: string
-        parent:
-          type: string
-      required:
-        - name
-    Category:
-      allOf:
-        - $ref: "#/components/schemas/CategoryCreate"
-        - type: object
-          properties:
-            id:
-              type: string
-    CategoryTree:
-      allOf:
-        - $ref: "#/components/schemas/Category"
-        - type: object
-          properties:
-            children:
-              type: array
-              items:
-                $ref: "#/components/schemas/CategoryTree"
-    OrderProduct:
-      type: object
-      properties:
-        product:
-          type: string
-        quantity:
-          type: number
-        price:
-          type: number
-    OrderCreate:
-      type: object
-      properties:
-        products:
-          type: array
-          items:
-            $ref: "#/components/schemas/OrderProduct"
-      required:
-        - products
-    Order:
-      type: object
-      properties:
-        id:
-          type: string
-        store:
-          type: string
-        products:
-          type: array
-          items:
-            $ref: "#/components/schemas/OrderProduct"
-        total:
-          type: number
-        status:
-          type: string
-        assignedTo:
-          type: string
-        paymentMethod:
-          type: string
-        cancellationReason:
-          type: string
-        statusHistory:
-          type: array
-          items:
-            type: object
-            properties:
-              status:
-                type: string
-              changedBy:
-                type: string
-              changedAt:
-                type: string
-                format: date-time
-    Message:
-      type: object
-      properties:
-        id:
-          type: string
-        sender:
-          type: string
-        receiver:
-          type: string
-        content:
-          type: string
-        timestamp:
-          type: string
-          format: date-time
-        order:
-          type: string
+        - in: query
+          name: category
+          schema:
+            type: string
+        - in: query
+          name: minPrice
+          schema:
+            type: number
+        - in: query
+          name: maxPrice
+          schema:
+            type: number
+        - in: query
+          name: inStock
+          schema:
+            type: boolean
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [price, name, createdAt]
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Paginated, filtered, and sorted list of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  products:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Product"
+
+  /api/products/category/{parentCategoryId}/products:
+    get:
+      summary: Get all products under a parent category (including descendants)
+      parameters:
+        - in: path
+          name: parentCategoryId
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+
+  /api/products/category/{parentCategoryIdOrSlug}/products/fast:
+    get:
+      summary: Fast single-query for products under a parent category
+      parameters:
+        - in: path
+          name: parentCategoryIdOrSlug
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+
+  /api/health:
+    get:
+      summary: Health check endpoint
+      responses:
+        "200":
+          description: Health check OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }

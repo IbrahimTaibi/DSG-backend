@@ -59,6 +59,15 @@ app.use("/api/users", userRoutes);
 const reviewRoutes = require("./routes/review");
 app.use("/api/reviews", reviewRoutes);
 
+const taxRoutes = require("./routes/tax");
+app.use("/api/taxes", taxRoutes);
+
+const invoiceRoutes = require("./routes/invoice");
+app.use("/api/invoices", invoiceRoutes);
+
+const companyInfoRoutes = require("./routes/companyInfo");
+app.use("/api/company", companyInfoRoutes);
+
 const errorHandler = require("./middleware/errorHandler");
 app.use(errorHandler);
 
